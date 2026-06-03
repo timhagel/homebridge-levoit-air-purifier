@@ -1,20 +1,20 @@
-import AsyncLock from 'async-lock';
-import deviceTypes, { DeviceType, DeviceCategory } from './deviceTypes';
+import AsyncLock from "async-lock";
+import deviceTypes, { DeviceType, DeviceCategory } from "./deviceTypes";
 
-import VeSync, { BypassMethod } from './VeSync';
-import { VeSyncGeneric } from './VeSyncGeneric';
+import VeSync, { BypassMethod } from "./VeSync";
+import { VeSyncGeneric } from "./VeSyncGeneric";
 
 export enum AirQuality {
   VERY_GOOD = 1,
   MODERATE = 3,
   UNKNOWN = 0,
   GOOD = 2,
-  POOR = 4
+  POOR = 4,
 }
 export enum Mode {
-  Manual = 'manual',
-  Sleep = 'sleep',
-  Auto = 'auto'
+  Manual = "manual",
+  Sleep = "sleep",
+  Auto = "auto",
 }
 
 export default class VeSyncFan implements VeSyncGeneric {
@@ -28,7 +28,7 @@ export default class VeSyncFan implements VeSyncGeneric {
   private _filterLife = 0;
   private _pm25 = 0;
 
-  public readonly manufacturer = 'Levoit';
+  public readonly manufacturer = "Levoit";
 
   public get airQualityLevel() {
     if (!this.deviceType.hasAirQuality) {
@@ -83,19 +83,26 @@ export default class VeSyncFan implements VeSyncGeneric {
     public readonly cid: string,
     public readonly region: string,
     public readonly model: string,
-    public readonly mac: string
+    public readonly mac: string,
   ) {
     this.deviceType = deviceTypes.find(({ isValid }) => isValid(this.model))!;
-    this.deviceCategory = this.model.includes('V') ? 'Vital' : 'Core';
+    this.deviceCategory = this.model.includes("V") ? "Vital" : "Core";
   }
 
   public async setChildLock(lock: boolean): Promise<boolean> {
-    const data = this.deviceCategory === 'Vital' ? {
-      childLockSwitch: lock ? 1 : 0
-    } : {
-      child_lock: lock,
-    };
-    const success = await this.client.sendCommand(this, BypassMethod.LOCK, data);
+    const data =
+      this.deviceCategory === "Vital"
+        ? {
+            childLockSwitch: lock ? 1 : 0,
+          }
+        : {
+            child_lock: lock,
+          };
+    const success = await this.client.sendCommand(
+      this,
+      BypassMethod.LOCK,
+      data,
+    );
 
     if (success) {
       this._childLock = lock;
@@ -105,14 +112,21 @@ export default class VeSyncFan implements VeSyncGeneric {
   }
 
   public async setPower(power: boolean): Promise<boolean> {
-    const data = this.deviceCategory === 'Vital' ? {
-      powerSwitch: power ? 1 : 0,
-      switchIdx: 0
-    } : {
-      enabled: power,
-      id: 0
-    };
-    const success = await this.client.sendCommand(this, BypassMethod.SWITCH, data);
+    const data =
+      this.deviceCategory === "Vital"
+        ? {
+            powerSwitch: power ? 1 : 0,
+            switchIdx: 0,
+          }
+        : {
+            enabled: power,
+            id: 0,
+          };
+    const success = await this.client.sendCommand(
+      this,
+      BypassMethod.SWITCH,
+      data,
+    );
 
     if (success) {
       this._isOn = power;
@@ -129,12 +143,19 @@ export default class VeSyncFan implements VeSyncGeneric {
       return false;
     }
 
-    const data = this.deviceCategory === 'Vital' ? {
-      workMode: mode.toString()
-    } : {
-      mode: mode.toString()
-    };
-    const success = await this.client.sendCommand(this, BypassMethod.MODE, data);
+    const data =
+      this.deviceCategory === "Vital"
+        ? {
+            workMode: mode.toString(),
+          }
+        : {
+            mode: mode.toString(),
+          };
+    const success = await this.client.sendCommand(
+      this,
+      BypassMethod.MODE,
+      data,
+    );
 
     if (success) {
       this._mode = mode;
@@ -148,17 +169,24 @@ export default class VeSyncFan implements VeSyncGeneric {
       return false;
     }
 
-    const data = this.deviceCategory === 'Vital' ? {
-      manualSpeedLevel: speed,
-      switchIdx: 0,
-      type: 'wind'
-    } : {
-      level: speed,
-      type: 'wind',
-      id: 0
-    };
+    const data =
+      this.deviceCategory === "Vital"
+        ? {
+            manualSpeedLevel: speed,
+            switchIdx: 0,
+            type: "wind",
+          }
+        : {
+            level: speed,
+            type: "wind",
+            id: 0,
+          };
 
-    const success = await this.client.sendCommand(this, BypassMethod.SPEED, data);
+    const success = await this.client.sendCommand(
+      this,
+      BypassMethod.SPEED,
+      data,
+    );
 
     if (success) {
       this._speed = speed;
@@ -168,14 +196,21 @@ export default class VeSyncFan implements VeSyncGeneric {
   }
 
   public async setDisplay(display: boolean): Promise<boolean> {
-    const data = this.deviceCategory === 'Vital' ? {
-      screenSwitch: display ? 1 : 0
-    } : {
-      state: display,
-      id: 0
-    };
+    const data =
+      this.deviceCategory === "Vital"
+        ? {
+            screenSwitch: display ? 1 : 0,
+          }
+        : {
+            state: display,
+            id: 0,
+          };
 
-    const success = await this.client.sendCommand(this, BypassMethod.DISPLAY, data);
+    const success = await this.client.sendCommand(
+      this,
+      BypassMethod.DISPLAY,
+      data,
+    );
 
     if (success) {
       this._screenVisible = display;
@@ -185,7 +220,7 @@ export default class VeSyncFan implements VeSyncGeneric {
   }
 
   public async updateInfo(): Promise<void> {
-    return this.lock.acquire('update-info', async () => {
+    return this.lock.acquire("update-info", async () => {
       try {
         if (Date.now() - this.lastCheck < 5 * 1000) {
           return;
@@ -200,16 +235,41 @@ export default class VeSyncFan implements VeSyncGeneric {
 
         const result = data?.result?.result;
 
-        this._pm25 = this.deviceType.hasPM25 ? result.air_quality_value || result.PM25 : 0;
+        this._pm25 = this.deviceType.hasPM25
+          ? (result.air_quality_value ?? result.PM25 ?? 0)
+          : 0;
         this._airQualityLevel = this.deviceType.hasAirQuality
-          ? result.air_quality || result.AQLevel
+          ? (result.air_quality ?? result.AQLevel ?? AirQuality.UNKNOWN)
           : AirQuality.UNKNOWN;
-        this._filterLife = result.filter_life || result.filterLifePercent;
-        this._screenVisible = result.display || result.screenSwitch;
-        this._childLock = result.child_lock || result.childLockSwitch;
-        this._isOn = result.enabled || result.powerSwitch;
-        this._speed = result.level || result.fanSpeedLevel;
-        this._mode = result.mode || result.workMode;
+        this._filterLife =
+          result.filter_life ?? result.filterLifePercent ?? this._filterLife;
+        this._screenVisible =
+          result.display ??
+          (result.screenSwitch === 1
+            ? true
+            : result.screenSwitch === 0
+              ? false
+              : this._screenVisible);
+        this._childLock =
+          result.child_lock ??
+          (result.childLockSwitch === 1
+            ? true
+            : result.childLockSwitch === 0
+              ? false
+              : this._childLock);
+        this._isOn =
+          result.enabled ??
+          (result.powerSwitch === 1
+            ? true
+            : result.powerSwitch === 0
+              ? false
+              : this._isOn);
+        this._speed =
+          result.level ??
+          result.fanSpeedLevel ??
+          result.manualSpeedLevel ??
+          this._speed;
+        this._mode = result.mode ?? result.workMode ?? this._mode;
       } catch (err: any) {
         this.client.log.error(err?.message);
       }
@@ -218,29 +278,29 @@ export default class VeSyncFan implements VeSyncGeneric {
 
   public static fromResponse =
     (client: VeSync) =>
-      ({
-        deviceStatus,
+    ({
+      deviceStatus,
+      deviceName,
+      extension: { airQualityLevel, fanSpeedLevel, mode },
+      uuid,
+      configModule,
+      cid,
+      deviceRegion,
+      deviceType,
+      macID,
+    }) =>
+      new VeSyncFan(
+        client,
         deviceName,
-        extension: { airQualityLevel, fanSpeedLevel, mode },
+        mode,
+        parseInt(fanSpeedLevel ?? "0", 10),
         uuid,
+        deviceStatus === "on",
+        airQualityLevel,
         configModule,
         cid,
         deviceRegion,
         deviceType,
-        macID
-      }) =>
-        new VeSyncFan(
-          client,
-          deviceName,
-          mode,
-          parseInt(fanSpeedLevel ?? '0', 10),
-          uuid,
-          deviceStatus === 'on',
-          airQualityLevel,
-          configModule,
-          cid,
-          deviceRegion,
-          deviceType,
-          macID
-        );
+        macID,
+      );
 }

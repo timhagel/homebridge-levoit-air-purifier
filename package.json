@@ -23,7 +23,8 @@
     "watch": "npm run build && npm link && nodemon",
     "lint": "eslint src/**.ts --max-warnings=0",
     "build": "rimraf ./dist && tsc",
-    "start": "npm run build && nodemon"
+    "start": "npm run build && nodemon",
+    "test:homebridge": "bash scripts/mac-homebridge-test.sh"
   },
   "devDependencies": {
     "@types/async-lock": "^1.4.2",
