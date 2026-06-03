@@ -9,6 +9,7 @@ export enum DeviceName {
   Core300S = '300S',
   Core201S = '201S',
   Core200S = '200S',
+  Core200SP = '200S-P',
   Vital100S  = 'V102S',
   Vital200S = 'V201S',
 }
@@ -60,7 +61,8 @@ const deviceTypes: DeviceType[] = [
   {
     isValid: (input: string) =>
       (input.includes(DeviceName.Core201S) && !input.includes(DeviceName.Vital200S)) ||
-      input.includes(DeviceName.Core200S),
+      input.includes(DeviceName.Core200S) ||
+      input.includes(DeviceName.Core200SP),
     hasAirQuality: false,
     hasAutoMode: false,
     speedMinStep: 25,

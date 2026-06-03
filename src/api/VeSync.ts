@@ -33,35 +33,78 @@ const lock = new AsyncLock();
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const API_BASE_URL_US = 'https://smartapi.vesync.com';
+const API_BASE_URL_EU = 'https://smartapi.vesync.eu';
+const CROSS_REGION_ERROR_CODE = -11260022;
+
 export default class VeSync {
   private api?: AxiosInstance;
   private accountId?: string;
   private token?: string;
+  private apiBaseUrl = API_BASE_URL_US;
+  private countryCode = 'US';
+  private currentRegion = 'US';
+  private traceCallNumber = 0;
 
-  private readonly VERSION = '1.3.1';
-  private readonly AGENT = `VeSync/VeSync 3.0.51(F5321;HomeBridge-VeSync ${this.VERSION})`;
+  private readonly VERSION = '5.6.60';
+  private readonly CLIENT_VERSION = `VeSync ${this.VERSION}`;
+  private readonly APP_ID = 'homebridge-levoit';
   private readonly TIMEZONE = 'America/New_York';
-  private readonly OS = 'HomeBridge-VeSync';
+  private readonly PHONE_BRAND = 'HomeBridge-VeSync';
+  private readonly PHONE_OS = 'Android';
   private readonly LANG = 'en';
-
-  private readonly AXIOS_OPTIONS = {
-    baseURL: 'https://smartapi.vesync.com',
-    timeout: 30000
-  };
+  private readonly terminalId: string;
 
   constructor(
     private readonly email: string,
     private readonly password: string,
     public readonly debugMode: DebugMode,
     public readonly log: Logger
-  ) { }
+  ) {
+    this.terminalId = `2${crypto
+      .createHash('md5')
+      .update(`${email}-HomeBridge-VeSync`)
+      .digest('hex')}`;
+  }
+
+  private get axiosOptions() {
+    return {
+      baseURL: this.apiBaseUrl,
+      timeout: 30000
+    };
+  }
+
+  private generateTraceId() {
+    this.traceCallNumber += 1;
+    const suffix = String(this.traceCallNumber).padStart(5, '0');
+    return `APP${this.terminalId.slice(-4)}${Date.now()}-${suffix}`;
+  }
+
+  private generateAuthBody(extra: Record<string, unknown> = {}) {
+    return {
+      acceptLanguage: this.LANG,
+      accountID: '',
+      clientInfo: this.PHONE_BRAND,
+      clientType: 'vesyncApp',
+      clientVersion: this.CLIENT_VERSION,
+      debugMode: false,
+      osInfo: this.PHONE_OS,
+      terminalId: this.terminalId,
+      timeZone: this.TIMEZONE,
+      token: '',
+      userCountryCode: this.countryCode,
+      traceId: this.generateTraceId(),
+      ...extra
+    };
+  }
 
   private generateDetailBody() {
     return {
       appVersion: this.VERSION,
-      phoneBrand: this.OS,
-      traceId: Date.now(),
-      phoneOS: this.OS
+      phoneBrand: this.PHONE_BRAND,
+      traceId: String(Date.now()),
+      phoneOS: this.PHONE_OS,
+      userCountryCode: this.countryCode
     };
   }
 
@@ -92,6 +135,28 @@ export default class VeSync {
         method,
         source: 'APP'
       }
+    };
+  }
+
+  private createApiClient() {
+    this.api = axios.create({
+      ...this.axiosOptions,
+      headers: {
+        'content-type': 'application/json',
+        'accept-language': this.LANG,
+        accountid: this.accountId!,
+        appversion: this.VERSION,
+        tz: this.TIMEZONE,
+        tk: this.token!
+      }
+    });
+  }
+
+  private mapDevicePropToExtension(deviceProp: Record<string, unknown> = {}) {
+    return {
+      airQualityLevel: deviceProp.AQLevel ?? deviceProp.airQualityLevel,
+      fanSpeedLevel: deviceProp.fanSpeedLevel ?? deviceProp.manualSpeedLevel ?? deviceProp.level,
+      mode: deviceProp.workMode ?? deviceProp.mode
     };
   }
 
@@ -216,62 +281,56 @@ export default class VeSync {
           .update(this.password)
           .digest('hex');
 
-        const response = await axios.post(
-          'cloud/v1/user/login',
+        const authResponse = await axios.post(
+          `${this.apiBaseUrl}/globalPlatform/api/accountAuth/v1/authByPWDOrOTM`,
           {
+            ...this.generateAuthBody(),
             email: this.email,
+            method: 'authByPWDOrOTM',
             password: pwdHashed,
-            devToken: '',
-            userType: 1,
-            method: 'login',
-            token: '',
-            ...this.generateDetailBody(),
-            ...this.generateBody()
+            authProtocolType: 'generic',
+            appID: this.APP_ID,
+            sourceAppID: this.APP_ID
           },
-          {
-            ...this.AXIOS_OPTIONS
-          }
+          this.axiosOptions
         );
 
-        if (!response?.data) {
+        if (!authResponse?.data) {
           this.debugMode.debug(
             '[LOGIN]',
             'No response data!! JSON:',
-            JSON.stringify(response)
+            JSON.stringify(authResponse)
           );
           return false;
         }
 
-        const { result } = response.data;
-        const { token, accountID } = result ?? {};
-
-        if (!token || !accountID) {
+        if (authResponse.data.code !== 0) {
           this.debugMode.debug(
             '[LOGIN]',
             'The authentication failed!! JSON:',
-            JSON.stringify(response.data)
+            JSON.stringify(authResponse.data)
           );
+          return false;
+        }
+
+        const { authorizeCode, accountID } = authResponse.data.result ?? {};
+
+        if (!authorizeCode || !accountID) {
+          this.debugMode.debug(
+            '[LOGIN]',
+            'The authentication failed!! JSON:',
+            JSON.stringify(authResponse.data)
+          );
+          return false;
+        }
+
+        const loginSuccess = await this.exchangeAuthorizationCode(authorizeCode);
+
+        if (!loginSuccess) {
           return false;
         }
 
         this.debugMode.debug('[LOGIN]', 'The authentication success');
-
-        this.accountId = accountID;
-        this.token = token;
-
-        this.api = axios.create({
-          ...this.AXIOS_OPTIONS,
-          headers: {
-            'content-type': 'application/json',
-            'accept-language': this.LANG,
-            accountid: this.accountId!,
-            'user-agent': this.AGENT,
-            appversion: this.VERSION,
-            tz: this.TIMEZONE,
-            tk: this.token!
-          }
-        });
-
         await delay(500);
         return true;
       } catch (error: any) {
@@ -279,6 +338,83 @@ export default class VeSync {
         return false;
       }
     });
+  }
+
+  private async exchangeAuthorizationCode(
+    authorizeCode: string,
+    bizToken?: string
+  ): Promise<boolean> {
+    const loginBody: Record<string, unknown> = {
+      ...this.generateAuthBody(),
+      method: 'loginByAuthorizeCode4Vesync',
+      emailSubscriptions: false
+    };
+
+    if (bizToken) {
+      loginBody.bizToken = bizToken;
+      loginBody.regionChange = 'lastRegion';
+    } else {
+      loginBody.authorizeCode = authorizeCode;
+    }
+
+    const response = await axios.post(
+      `${this.apiBaseUrl}/user/api/accountManage/v1/loginByAuthorizeCode4Vesync`,
+      loginBody,
+      this.axiosOptions
+    );
+
+    if (!response?.data) {
+      this.debugMode.debug(
+        '[LOGIN]',
+        'No response data!! JSON:',
+        JSON.stringify(response)
+      );
+      return false;
+    }
+
+    if (response.data.code === CROSS_REGION_ERROR_CODE) {
+      const result = response.data.result ?? {};
+      this.countryCode = result.countryCode ?? this.countryCode;
+      this.currentRegion = result.currentRegion ?? this.currentRegion;
+      this.apiBaseUrl = this.currentRegion === 'EU' ? API_BASE_URL_EU : API_BASE_URL_US;
+
+      this.debugMode.debug(
+        '[LOGIN]',
+        `Cross-region login detected, retrying in region ${this.currentRegion}...`
+      );
+
+      return this.exchangeAuthorizationCode(authorizeCode, result.bizToken);
+    }
+
+    if (response.data.code !== 0) {
+      this.debugMode.debug(
+        '[LOGIN]',
+        'The authentication failed!! JSON:',
+        JSON.stringify(response.data)
+      );
+      return false;
+    }
+
+    const { token, accountID, countryCode } = response.data.result ?? {};
+
+    if (!token || !accountID) {
+      this.debugMode.debug(
+        '[LOGIN]',
+        'The authentication failed!! JSON:',
+        JSON.stringify(response.data)
+      );
+      return false;
+    }
+
+    this.accountId = accountID;
+    this.token = token;
+
+    if (countryCode) {
+      this.countryCode = countryCode;
+    }
+
+    this.createApiClient();
+    return true;
   }
 
   public async getDevices() {
@@ -333,26 +469,31 @@ export default class VeSync {
           JSON.stringify(list)
         );
 
+        const isSupportedPurifier = ({ deviceType, type }: { deviceType: string; type: string }) =>
+          !!deviceTypes.find(({ isValid }) => isValid(deviceType)) && type === 'wifi-air';
 
-        let purifiers = list
+        const purifiersFromExtension = list
           .filter(
-            ({ deviceType, type, extension }) =>
-              !!deviceTypes.find(({ isValid }) => isValid(deviceType)) &&
-              type === 'wifi-air' &&
-              !!extension?.fanSpeedLevel
+            (device: any) =>
+              isSupportedPurifier(device) &&
+              !!device.extension?.fanSpeedLevel
           )
           .map(VeSyncFan.fromResponse(this));
 
-          // Newer Vital purifiers
-          purifiers = purifiers.concat(list
+        const purifiersFromDeviceProp = list
           .filter(
-            ({ deviceType, type, deviceProp }) =>
-              !!deviceTypes.find(({ isValid }) => isValid(deviceType)) &&
-              type === 'wifi-air' &&
-              !!deviceProp
+            (device: any) =>
+              isSupportedPurifier(device) &&
+              !!device.deviceProp &&
+              !device.extension?.fanSpeedLevel
           )
-          .map((fan: any) => ({ ...fan, extension: { ...fan.deviceProp, airQualityLevel: fan.deviceProp.AQLevel, mode: fan.deviceProp.workMode } }))
-          .map(VeSyncFan.fromResponse(this)));
+          .map((device: any) => ({
+            ...device,
+            extension: this.mapDevicePropToExtension(device.deviceProp)
+          }))
+          .map(VeSyncFan.fromResponse(this));
+
+        const purifiers = purifiersFromExtension.concat(purifiersFromDeviceProp);
 
         const humidifiers = list
           .filter(
